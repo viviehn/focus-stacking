@@ -1,0 +1,8 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "focus_stacking"
+version = "1.0"
+description = "Focus stacking implementations"
