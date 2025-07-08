@@ -7,12 +7,14 @@ def bgr_to_grayscale(im):
 def grayscale_to_bgr(im):
     return cv2.cvtColor(im, cv2.COLOR_GRAY2BGR)
 
-
 # image with negative values 
 def normalize_with_neg(im):
     range_im = (((im / 255) +1) / 2) * 255
     normalize_im = (range_im - range_im.min() / (range_im.max() - range_im.min()))
     return normalize_im
+
+def normalize_im(im):
+    return (im - im.min())/(im.max() - im.min())
 
 # to display images with matplotlib
 def bgr_to_rgb(im):

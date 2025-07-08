@@ -40,7 +40,6 @@ def gen_pyramid_im(levels, out_path=None, process_im=lambda x: x, gray=False):
 # an image/slice from the focus stack)
 class StackPyramid(object):
     def __init__(self, images, depth, kernel, pyramid_type='gaussian', wvt_name=None):
-        print(pyramid_type)
         if pyramid_type == 'gaussian':
             self.pyramids = [Pyramid(im, depth, kernel) for im in images]
         elif pyramid_type == 'laplacian_pyramid':
@@ -114,7 +113,6 @@ class LaplacianPyramid(Pyramid):
             # self.min_im_w = levels[-1].shape[1]
 
     def make_pyramid(self):
-        print('making pyramid')
         super().make_pyramid()
 
         for level_id in range(self.depth - 1):
@@ -151,7 +149,6 @@ class WaveletPyramid(Pyramid):
             self.kernel = None
             
     def make_pyramid(self):
-        print('making pyramid')
         LL = self.levels[0]['image']
         for level_id in range(self.depth):
             coeffs2 = self.downsample(self.levels[level_id]['image'])
@@ -166,8 +163,7 @@ class WaveletPyramid(Pyramid):
                 [(l['LH'],
                   l['HL'],
                   l['HH']) for l in self.levels[-2::-1]])
-        for l in self.levels[-2::-1]:
-            print(l['LH'].shape, l['HL'].shape, l['HH'].shape)
+
         image = self.upsample_full(coeffs)
         return image
 
@@ -207,18 +203,20 @@ def run_laplacian_pyramid_pipeline(args, registered_images):
 
     # TODO: generalize to any level energies, fusion strategy
     level_fusion_fn = pipeline_utils.get_fusion_fn(args.st_level_fusion, args)
-    fused_layers = [{'laplacian': level_fusion_fn([pyramid.levels[level]['local_region'] for pyramid in stack.pyramids],
-                                    [pyramid.levels[level]['laplacian'] for pyramid in stack.pyramids])
-                    }
-                    for level in range(stack.depth - 1)]
+    fused_layers = []
+    for level in range(stack.depth - 1):
+        fused_result, indices = level_fusion_fn([pyramid.levels[level]['local_region'] for pyramid in stack.pyramids],
+                                    [pyramid.levels[level]['laplacian'] for pyramid in stack.pyramids], True)
+        fused_layers.append({'laplacian': fused_result, 'indices': indices})
+    
     fused_layers.append({'laplacian':fused_base})
 
     reconstruction_pyramid = LaplacianPyramid(levels=fused_layers, kernel=low_pass_kernel)
     fused_im = reconstruction_pyramid.reconstruct()
-    return fused_im
+    return fused_im, reconstruction_pyramid
 
 def run_wavelet_pipeline(args, registered_images):
-    def _fuse_single_color_ch(registered_images, ch_index):
+    def _fuse_single_color_ch(registered_images, ch_index, assign_closest=True):
         sub_band_names = ['LH', 'HL', 'HH']
         ims = [im[...,ch_index].astype(np.float32)/255. for im in registered_images]
         stack = StackPyramid(images=ims,
@@ -250,30 +248,49 @@ def run_wavelet_pipeline(args, registered_images):
                         )
 
         fused_sub_bands = {sub_band: [] for sub_band in sub_band_names}
+        fusion_fn = pipeline_utils.get_fusion_fn(args.st_level_fusion, args)
         for level_id in range(stack.depth):
+            input_energies = []
+            input_sources = []
             for sub_band in sub_band_names:
                 energy_name = args.st_level_energies[0]
                 input_energy = [pyramid.levels[level_id][f'{sub_band}_{energy_name}'] for pyramid in stack.pyramids]
-                input_ims = [pyramid.levels[level_id][sub_band][...,np.newaxis] for pyramid in stack.pyramids]
-                fused_sub_band = fusion.fuse_max(input_energy, input_ims)
-                fused_sub_bands[sub_band].append(fused_sub_band)
-        energy_name = args.st_base_energies[0]
-        fused_base = fusion.fuse_max([pyramid.levels[-1][energy_name] for pyramid in stack.pyramids],
-                                        [pyramid.levels[-1]['image'].astype(np.float32)[...,np.newaxis] for pyramid in stack.pyramids])
+                input_energies.append(input_energy)
+                input_src = [pyramid.levels[level_id][sub_band][...,np.newaxis] for pyramid in stack.pyramids]
+                input_sources.append(input_src)
+            voted_sub_bands = fusion.fuse_multiple_max_vote(input_energies, input_sources)
+            for sub_band, voted_sub_band in zip(sub_band_names, voted_sub_bands):
+                fused_sub_bands[sub_band].append(voted_sub_band)
 
+        energy_name = args.st_base_energies[0]
+        # fused_base = fusion.fuse_max([pyramid.levels[-1][energy_name] for pyramid in stack.pyramids],
+        #                                [pyramid.levels[-1]['image'].astype(np.float32)[...,np.newaxis] for pyramid in stack.pyramids])
+        # print(fused_base.shape)
+        fused_base = np.mean(np.stack([pyramid.levels[-1]['image'][...,np.newaxis] for pyramid in stack.pyramids]),axis=0)
+        # print(fused_base.shape)
         recon_levels = [{sub_band: fused_sub_bands[sub_band][i][...,0] for sub_band in sub_band_names} for i in range(stack.depth)]
         recon_levels.append({'image': fused_base[...,0]})
         recon_pyramid = WaveletPyramid(levels=recon_levels, wvt_name=args.st_wavelet_name)
         fused_ch = recon_pyramid.reconstruct()
-        return fused_ch
+        if assign_closest:
+            original_channels = np.stack(ims)
+            diff = np.abs(original_channels - fused_ch)
+            print(fused_ch.min(), fused_ch.max())
+            fused_ch = fusion.fuse_min([d for d in diff], [im[...,np.newaxis] for im in ims])[...,0]
+            print(fused_ch.min(), fused_ch.max())
+        return fused_ch, stack, recon_pyramid
 
     fused_channels = []
-    for ch_index in range(3):
-        fused_channels.append(_fuse_single_color_ch(registered_images, ch_index))
-    print(fused_channels)
+    stacks = []
+    recon_pyramids = []
+    for ch_index in range(registered_images[0].shape[-1]):
+        fused_ch, stack, recon_pyramid = _fuse_single_color_ch(registered_images, ch_index, assign_closest=args.st_reassign_ch)
+        fused_channels.append(fused_ch)
+        stacks.append(stack)
+        recon_pyramids.append(recon_pyramid)
     fused_im = np.stack(fused_channels,axis=-1)
     fused_im = np.clip(fused_im, 0, 1)
     fused_im = (fused_im * 255).astype(np.uint8)
-    return fused_im
+    return fused_im, stacks, recon_pyramids
 
 

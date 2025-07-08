@@ -71,7 +71,7 @@ def local_global_entropy(im, neighborhood, im_color=True):
     if im_color:
         gray_im = cv2.cvtColor(im.astype(np.float32), cv2.COLOR_BGR2GRAY)
     else:
-        gray_im = im
+        gray_im = im.astype(np.uint8)
 
     probabilities = gray_level_probabilities(gray_im)
     information = np.log(probabilities[gray_im.astype(np.uint8)])

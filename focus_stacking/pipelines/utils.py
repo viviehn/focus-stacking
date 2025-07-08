@@ -24,6 +24,10 @@ def get_energy_fn(name, args):
 
 def get_fusion_fn(name, args):
     if name == 'max':
-        return lambda energy, images : fusion.fuse_max(energy, images)
-    if name == 'multi_max':
-        return lambda energies, images : fusion.fuse_multiple_max(energies, images)
+        return lambda energy, sources, return_indices : fusion.fuse_max(energy, sources, return_indices)
+    elif name == 'multi_max_mean':
+        return lambda energies, sources : fusion.fuse_multiple_max_mean(energies, sources)
+    elif name == 'multi_max_vote':
+        return lambda energies, sources : fusion.fuse_multiple_max_vote(energies, sources)
+    elif name == 'multi_max':
+        return lambda energies, sources : fusion.fuse_multiple_max(energies, sources)

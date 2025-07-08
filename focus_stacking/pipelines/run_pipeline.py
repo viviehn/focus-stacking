@@ -43,6 +43,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--scale_transform.type', type=str, choices=SCALE_TRANSFORMS, help='energies used for pyramid base fusion', dest='st_type')
     parser.add_argument('--scale_transform.wavelet_name', type=str, help='energies used for pyramid base fusion', dest='st_wavelet_name')
+    parser.add_argument('--scale_transform.reassign_ch', action='store_true', dest='st_reassign_ch')
     parser.add_argument('--scale_transform.kwidth', type=int, help='kernel width for pyramid construction', default=63, dest='st_kwidth')
     parser.add_argument('--scale_transform.depth', type=int, help='pyramid depth/number of levels in pyramid', default=5, dest='st_depth')
     parser.add_argument('--scale_transform.base_energies', nargs='+', choices=ENERGIES, help='energies used for pyramid base fusion', dest='st_base_energies')
@@ -99,7 +100,7 @@ if __name__ == "__main__":
         if args.st_type == 'laplacian_pyramid':
             fused_im = scale_transform.run_laplacian_pyramid_pipeline(args, registered_images)
         if args.st_type == 'wavelet':
-            fused_im = scale_transform.run_wavelet_pipeline(args, registered_images)
+            fused_im, _ = scale_transform.run_wavelet_pipeline(args, registered_images)
 
     cv2.imwrite(f'{results_out_dir}/{args.out_fname}', fused_im)
 

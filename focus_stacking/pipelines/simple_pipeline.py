@@ -32,5 +32,5 @@ def run_pipeline(args, registered_images):
         energies = energies[0]
         
     print(energies)
-    fused_im = fusion_fn(energies, registered_images)
-    return fused_im
+    fused_im, indices = fusion_fn(energies, registered_images, return_indices=True)
+    return fused_im, indices
